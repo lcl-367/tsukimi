@@ -436,15 +436,13 @@ mod imp {
             }
             let saved_font = SETTINGS.danmaku_font();
             if !saved_font.is_empty() {
+                let escaped = saved_font.replace('\\', "\\\\").replace('"', "\\\"");
                 provider.load_from_string(&format!(
-                    ".danmakw-area {{ font-family: \"{saved_font}\"; }}"
+                    ".danmakw-area {{ font-family: \"{escaped}\"; }}"
                 ));
-                if let Some(font_desc) =
-                    gtk::pango::FontDescription::from_string(&saved_font).family()
-                {
-                    self.danmaku_font_button.set_font_desc(
-                        &gtk::pango::FontDescription::from_string(font_desc.as_str()),
-                    );
+                let font_desc = gtk::pango::FontDescription::from_string(&saved_font);
+                if font_desc.family().is_some() {
+                    self.danmaku_font_button.set_font_desc(&font_desc);
                 }
             }
 
@@ -1891,8 +1889,9 @@ impl MPVPage {
             if family.is_empty() {
                 provider.load_from_string("");
             } else {
+                let escaped = family.replace('\\', "\\\\").replace('"', "\\\"");
                 provider.load_from_string(&format!(
-                    ".danmakw-area {{ font-family: \"{family}\"; }}"
+                    ".danmakw-area {{ font-family: \"{escaped}\"; }}"
                 ));
             }
         }
