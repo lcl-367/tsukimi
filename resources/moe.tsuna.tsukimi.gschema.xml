@@ -240,5 +240,10 @@
       <description>-1 = default (api.dandanplay.net), 0+ = index into custom servers list</description>
       <default>-1</default>
     </key>
+    <key name="danmaku-font" type="s">
+      <summary>Danmaku font family</summary>
+      <description>Font family to use for danmaku rendering. Empty string means use the system GTK font.</description>
+      <default>""</default>
+    </key>
   </schema>
 </schemalist>

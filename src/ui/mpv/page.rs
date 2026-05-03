@@ -192,6 +192,9 @@ mod imp {
         pub video_overlay: TemplateChild<gtk::Overlay>,
 
         #[template_child]
+        pub danmaku_font_button: TemplateChild<gtk::FontDialogButton>,
+
+        #[template_child]
         pub danmaku_area: TemplateChild<DanmakwArea>,
 
         #[template_child]
@@ -257,6 +260,8 @@ mod imp {
         pub danmaku_client: OnceCell<dandanapi::DanDanClient>,
 
         pub danmaku_list: RefCell<Option<Vec<danmakw::Danmaku>>>,
+
+        pub danmaku_font_css_provider: OnceCell<gtk::CssProvider>,
     }
 
     #[glib::object_subclass]
@@ -416,6 +421,32 @@ mod imp {
             SETTINGS
                 .bind("danmaku-opacity", &self.danmaku_opacity_adj.get(), "value")
                 .build();
+
+            // Initialise the danmaku font CSS provider and apply any saved font.
+            let provider = gtk::CssProvider::new();
+            self.danmaku_font_css_provider
+                .set(provider.clone())
+                .expect("danmaku_font_css_provider already set");
+            if let Some(display) = gtk::gdk::Display::default() {
+                gtk::style_context_add_provider_for_display(
+                    &display,
+                    &provider,
+                    gtk::STYLE_PROVIDER_PRIORITY_USER,
+                );
+            }
+            let saved_font = SETTINGS.danmaku_font();
+            if !saved_font.is_empty() {
+                provider.load_from_string(&format!(
+                    ".danmakw-area {{ font-family: \"{saved_font}\"; }}"
+                ));
+                if let Some(font_desc) =
+                    gtk::pango::FontDescription::from_string(&saved_font).family()
+                {
+                    self.danmaku_font_button.set_font_desc(
+                        &gtk::pango::FontDescription::from_string(font_desc.as_str()),
+                    );
+                }
+            }
 
             self.video_scale.set_player(Some(&self.video.get()));
 
@@ -1843,6 +1874,37 @@ impl MPVPage {
         let selected = self.imp().danmaku_server_combo.selected();
         let _ = SETTINGS.set_danmaku_active_server(danmaku_combo_to_server_index(selected));
         self.apply_active_server();
+    }
+
+    #[template_callback]
+    pub fn on_danmaku_font_changed(&self, _pspec: glib::ParamSpec) {
+        let font_desc = self.imp().danmaku_font_button.font_desc();
+        let family = font_desc
+            .as_ref()
+            .and_then(|d| d.family())
+            .map(|f| f.to_string())
+            .unwrap_or_default();
+
+        let _ = SETTINGS.set_danmaku_font(&family);
+
+        if let Some(provider) = self.imp().danmaku_font_css_provider.get() {
+            if family.is_empty() {
+                provider.load_from_string("");
+            } else {
+                provider.load_from_string(&format!(
+                    ".danmakw-area {{ font-family: \"{family}\"; }}"
+                ));
+            }
+        }
+
+        // Defer the font-name poke so the CSS style update is processed first.
+        glib::idle_add_local_once(glib::clone!(
+            #[weak(rename_to = obj)]
+            self,
+            move || {
+                obj.imp().danmaku_area.set_font_name(String::new());
+            }
+        ));
     }
 
     pub fn apply_active_server(&self) {
