@@ -47,7 +47,7 @@ jobs:
           tar -czf tsukimi-x86_64-apple-darwin.tar.gz Tsukimi.app/
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{matrix.artifact}}-${{matrix.target}}
           path: tsukimi-${{matrix.target}}.tar.gz
