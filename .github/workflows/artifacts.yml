@@ -22,7 +22,7 @@ jobs:
 
     steps:
       - name: Download artifact
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v8
 
       - name: Create compressed file
         run: |
@@ -52,7 +52,7 @@ jobs:
     if: github.ref_type == 'tag'
     steps:
       - name: Download artifact
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v8
         with:
           pattern: "**-linux"
           path: artifacts-linux
@@ -82,7 +82,7 @@ jobs:
     if: github.event_name == 'push' && github.ref_name == 'master'
     steps:
       - name: Download artifact
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v8
         with:
           path: nightly-artifacts
 

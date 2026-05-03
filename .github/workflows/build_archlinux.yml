@@ -67,7 +67,7 @@ jobs:
           cp /tmp/pkgbuild/tsukimi-git-*.pkg.tar.zst "$GITHUB_WORKSPACE"/
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: tsukimi-${{ matrix.platform }}-archlinux-linux
           path: |
