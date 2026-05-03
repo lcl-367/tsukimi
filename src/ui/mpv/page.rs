@@ -1994,6 +1994,16 @@ pub async fn media_source_stream_url(source: &MediaSource) -> Option<String> {
 }
 
 pub async fn extract_url(source: &MediaSource) -> Option<String> {
+    if let Some(url) = &source.direct_stream_url {
+        if !url.is_empty() {
+            return Some(JELLYFIN_CLIENT.get_streaming_url(url).await);
+        }
+    }
+    if let Some(url) = &source.transcoding_url {
+        if !url.is_empty() {
+            return Some(JELLYFIN_CLIENT.get_streaming_url(url).await);
+        }
+    }
     if let Some(url) = media_source_stream_url(source).await {
         return Some(url);
     }
