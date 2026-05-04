@@ -391,10 +391,12 @@ impl MPVControlSidebar {
     #[template_callback]
     pub fn on_sub_font(&self, _param: glib::ParamSpec, button: gtk::FontDialogButton) {
         let font_desc = button.font_desc().unwrap();
-        SETTINGS
-            .set_mpv_subtitle_font(font_desc.to_string())
-            .unwrap();
-        self.set_mpv_property("sub-font", font_desc.to_string());
+        let family = font_desc
+            .family()
+            .map(|f| f.to_string())
+            .unwrap_or_default();
+        SETTINGS.set_mpv_subtitle_font(family.clone()).unwrap();
+        self.set_mpv_property("sub-font", family);
     }
 
     #[template_callback]
