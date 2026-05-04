@@ -74,6 +74,18 @@ const MIN_MOTION_TIME: i64 = 100000;
 const PREV_CHAPTER_KEYVAL: u32 = 65366;
 const NEXT_CHAPTER_KEYVAL: u32 = 65365;
 
+/// Escapes a font family name so it is safe to embed inside a CSS quoted
+/// string.  Backslashes and double-quotes are escaped with a backslash; any
+/// remaining ASCII control characters (which must never appear in a font
+/// family name) are stripped.
+fn escape_css_font_family(name: &str) -> String {
+    name.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .chars()
+        .filter(|c| !c.is_ascii_control())
+        .collect()
+}
+
 mod imp {
 
     use std::cell::{
@@ -452,19 +464,7 @@ mod imp {
                 }
             }
             // Apply combined CSS for any saved fonts.
-            {
-                let families: Vec<String> = [&saved_font, &saved_monospace_font]
-                    .iter()
-                    .filter(|f| !f.is_empty())
-                    .map(|f| format!("\"{}\"", f.replace('\\', "\\\\").replace('"', "\\\"")))
-                    .collect();
-                if !families.is_empty() {
-                    provider.load_from_string(&format!(
-                        ".danmakw-area {{ font-family: {}; }}",
-                        families.join(", ")
-                    ));
-                }
-            }
+            self.obj().apply_danmaku_font_css();
 
             self.video_scale.set_player(Some(&self.video.get()));
 
@@ -1953,7 +1953,7 @@ impl MPVPage {
         let families: Vec<String> = [&regular, &monospace]
             .iter()
             .filter(|f| !f.is_empty())
-            .map(|f| format!("\"{}\"", f.replace('\\', "\\\\").replace('"', "\\\"")))
+            .map(|f| format!("\"{}\"", escape_css_font_family(f)))
             .collect();
         if families.is_empty() {
             provider.load_from_string("");

@@ -250,10 +250,5 @@
       <description>Monospace font family for danmaku rendering. Empty string means not set.</description>
       <default>""</default>
     </key>
-    <key name="danmaku-font-type" type="s">
-      <summary>Active danmaku font type</summary>
-      <description>Which font type is currently active: "regular" or "monospace".</description>
-      <default>"regular"</default>
-    </key>
   </schema>
 </schemalist>
