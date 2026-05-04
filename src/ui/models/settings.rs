@@ -68,6 +68,8 @@ impl Settings {
     const KEY_DANMAKU_APPSECRET: &'static str = "danmaku-appsecret"; // String
     const KEY_DANMAKU_SERVERS: &'static str = "danmaku-servers"; // String (JSON)
     const KEY_DANMAKU_ACTIVE_SERVER: &'static str = "danmaku-active-server"; // i32
+    const KEY_DANMAKU_FONT: &'static str = "danmaku-font"; // String
+    const KEY_DANMAKU_MONOSPACE_FONT: &'static str = "danmaku-monospace-font"; // String
 
     fn has_key(&self, key: &str) -> bool {
         self.settings_schema()
@@ -140,6 +142,22 @@ impl Settings {
 
     pub fn set_danmaku_active_server(&self, index: i32) -> Result<(), glib::BoolError> {
         self.set_int(Self::KEY_DANMAKU_ACTIVE_SERVER, index)
+    }
+
+    pub fn danmaku_font(&self) -> String {
+        self.string(Self::KEY_DANMAKU_FONT).to_string()
+    }
+
+    pub fn set_danmaku_font(&self, font: &str) -> Result<(), glib::BoolError> {
+        self.set_string(Self::KEY_DANMAKU_FONT, font)
+    }
+
+    pub fn danmaku_monospace_font(&self) -> String {
+        self.string(Self::KEY_DANMAKU_MONOSPACE_FONT).to_string()
+    }
+
+    pub fn set_danmaku_monospace_font(&self, font: &str) -> Result<(), glib::BoolError> {
+        self.set_string(Self::KEY_DANMAKU_MONOSPACE_FONT, font)
     }
 
     #[cfg(target_os = "windows")]
