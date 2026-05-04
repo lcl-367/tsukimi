@@ -195,6 +195,9 @@ mod imp {
         pub danmaku_font_button: TemplateChild<gtk::FontDialogButton>,
 
         #[template_child]
+        pub danmaku_monospace_font_button: TemplateChild<gtk::FontDialogButton>,
+
+        #[template_child]
         pub danmaku_area: TemplateChild<DanmakwArea>,
 
         #[template_child]
@@ -436,13 +439,30 @@ mod imp {
             }
             let saved_font = SETTINGS.danmaku_font();
             if !saved_font.is_empty() {
-                let escaped = saved_font.replace('\\', "\\\\").replace('"', "\\\"");
-                provider.load_from_string(&format!(
-                    ".danmakw-area {{ font-family: \"{escaped}\"; }}"
-                ));
                 let font_desc = gtk::pango::FontDescription::from_string(&saved_font);
                 if font_desc.family().is_some() {
                     self.danmaku_font_button.set_font_desc(&font_desc);
+                }
+            }
+            let saved_monospace_font = SETTINGS.danmaku_monospace_font();
+            if !saved_monospace_font.is_empty() {
+                let font_desc = gtk::pango::FontDescription::from_string(&saved_monospace_font);
+                if font_desc.family().is_some() {
+                    self.danmaku_monospace_font_button.set_font_desc(&font_desc);
+                }
+            }
+            // Apply combined CSS for any saved fonts.
+            {
+                let families: Vec<String> = [&saved_font, &saved_monospace_font]
+                    .iter()
+                    .filter(|f| !f.is_empty())
+                    .map(|f| format!("\"{}\"", f.replace('\\', "\\\\").replace('"', "\\\"")))
+                    .collect();
+                if !families.is_empty() {
+                    provider.load_from_string(&format!(
+                        ".danmakw-area {{ font-family: {}; }}",
+                        families.join(", ")
+                    ));
                 }
             }
 
@@ -1885,16 +1905,7 @@ impl MPVPage {
 
         let _ = SETTINGS.set_danmaku_font(&family);
 
-        if let Some(provider) = self.imp().danmaku_font_css_provider.get() {
-            if family.is_empty() {
-                provider.load_from_string("");
-            } else {
-                let escaped = family.replace('\\', "\\\\").replace('"', "\\\"");
-                provider.load_from_string(&format!(
-                    ".danmakw-area {{ font-family: \"{escaped}\"; }}"
-                ));
-            }
-        }
+        self.apply_danmaku_font_css();
 
         // Defer the font-name poke so the CSS style update is processed first.
         glib::idle_add_local_once(glib::clone!(
@@ -1904,6 +1915,54 @@ impl MPVPage {
                 obj.imp().danmaku_area.set_font_name(String::new());
             }
         ));
+    }
+
+    #[template_callback]
+    pub fn on_danmaku_monospace_font_changed(&self, _pspec: glib::ParamSpec) {
+        let font_desc = self.imp().danmaku_monospace_font_button.font_desc();
+        let family = font_desc
+            .as_ref()
+            .and_then(|d| d.family())
+            .map(|f| f.to_string())
+            .unwrap_or_default();
+
+        let _ = SETTINGS.set_danmaku_monospace_font(&family);
+
+        self.apply_danmaku_font_css();
+
+        // Defer the font-name poke so the CSS style update is processed first.
+        glib::idle_add_local_once(glib::clone!(
+            #[weak(rename_to = obj)]
+            self,
+            move || {
+                obj.imp().danmaku_area.set_font_name(String::new());
+            }
+        ));
+    }
+
+    /// Rebuilds the CSS for `.danmakw-area { font-family: … }` from the
+    /// currently saved regular and monospace font settings.  Regular font is
+    /// listed first so it takes priority; the monospace font acts as a
+    /// fallback for characters not covered by the regular font.
+    fn apply_danmaku_font_css(&self) {
+        let Some(provider) = self.imp().danmaku_font_css_provider.get() else {
+            return;
+        };
+        let regular = SETTINGS.danmaku_font();
+        let monospace = SETTINGS.danmaku_monospace_font();
+        let families: Vec<String> = [&regular, &monospace]
+            .iter()
+            .filter(|f| !f.is_empty())
+            .map(|f| format!("\"{}\"", f.replace('\\', "\\\\").replace('"', "\\\"")))
+            .collect();
+        if families.is_empty() {
+            provider.load_from_string("");
+        } else {
+            provider.load_from_string(&format!(
+                ".danmakw-area {{ font-family: {}; }}",
+                families.join(", ")
+            ));
+        }
     }
 
     pub fn apply_active_server(&self) {
