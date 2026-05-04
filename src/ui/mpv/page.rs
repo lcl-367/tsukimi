@@ -466,6 +466,14 @@ mod imp {
             // Apply combined CSS for any saved fonts.
             self.obj().apply_danmaku_font_css();
 
+            // Re-read the font from the pango context whenever the widget's CSS
+            // style is recalculated.  `danmakw`'s `set_font_name` reads from the
+            // pango context, and this signal fires *after* GTK has committed the
+            // CSS change to the style context, so the value is always up-to-date.
+            self.danmaku_area.connect_style_updated(|area| {
+                area.set_font_name(String::new());
+            });
+
             self.video_scale.set_player(Some(&self.video.get()));
 
             let obj = self.obj();
@@ -1906,15 +1914,6 @@ impl MPVPage {
         let _ = SETTINGS.set_danmaku_font(&family);
 
         self.apply_danmaku_font_css();
-
-        // Defer the font-name poke so the CSS style update is processed first.
-        glib::idle_add_local_once(glib::clone!(
-            #[weak(rename_to = obj)]
-            self,
-            move || {
-                obj.imp().danmaku_area.set_font_name(String::new());
-            }
-        ));
     }
 
     #[template_callback]
@@ -1929,21 +1928,17 @@ impl MPVPage {
         let _ = SETTINGS.set_danmaku_monospace_font(&family);
 
         self.apply_danmaku_font_css();
-
-        // Defer the font-name poke so the CSS style update is processed first.
-        glib::idle_add_local_once(glib::clone!(
-            #[weak(rename_to = obj)]
-            self,
-            move || {
-                obj.imp().danmaku_area.set_font_name(String::new());
-            }
-        ));
     }
 
     /// Rebuilds the CSS for `.danmakw-area { font-family: … }` from the
     /// currently saved regular and monospace font settings.  Regular font is
     /// listed first so it takes priority; the monospace font acts as a
     /// fallback for characters not covered by the regular font.
+    ///
+    /// Updating the CSS provider is sufficient: the `connect_style_updated`
+    /// handler installed in `constructed` will call `set_font_name` once GTK
+    /// has committed the CSS change to the pango context (i.e., after the
+    /// layout phase), avoiding any idle-callback timing race.
     fn apply_danmaku_font_css(&self) {
         let Some(provider) = self.imp().danmaku_font_css_provider.get() else {
             return;
