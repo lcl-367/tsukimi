@@ -472,9 +472,11 @@ impl AccountSettings {
         &self, _param: glib::ParamSpec, button: gtk::FontDialogButton,
     ) {
         let font_desc = button.font_desc().unwrap();
-        SETTINGS
-            .set_mpv_subtitle_font(gtk::pango::FontDescription::to_string(&font_desc))
-            .unwrap();
+        let family = font_desc
+            .family()
+            .map(|f| f.to_string())
+            .unwrap_or_default();
+        SETTINGS.set_mpv_subtitle_font(family).unwrap();
     }
 
     #[template_callback]
