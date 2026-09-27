@@ -205,6 +205,13 @@ fn build_base_url(url: Url, server_type: ServerType) -> Result<Url> {
     }
 }
 
+fn resolve_url(base: &Url, path: &str) -> String {
+    Url::parse(path)
+        .or_else(|_| base.join(path))
+        .expect("Failed to resolve media URL")
+        .to_string()
+}
+
 fn generate_hash(s: &str) -> String {
     let mut hasher = fnv::FnvHasher::default();
     hasher.write(s.as_bytes());
@@ -952,7 +959,7 @@ impl JellyfinClient {
     pub fn resolve_url(&self, path: &str) -> String {
         let s = self.session();
         let (url, _) = s.url_headers.as_ref().expect("Client not initialized");
-        url.join(path.trim_start_matches('/')).unwrap().to_string()
+        resolve_url(url, path)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1750,6 +1757,28 @@ mod tests {
         };
 
         assert_eq!(url, "http://127.0.0.1");
+    }
+
+    #[test]
+    fn resolve_url_keeps_absolute_urls() {
+        let base = Url::parse("https://example.com/jellyfin/").unwrap();
+        let absolute = "https://cdn.example.com/video.mp4?token=abc";
+
+        assert_eq!(resolve_url(&base, absolute), absolute);
+    }
+
+    #[test]
+    fn resolve_url_handles_relative_and_root_relative_urls() {
+        let base = Url::parse("https://example.com/jellyfin/").unwrap();
+
+        assert_eq!(
+            resolve_url(&base, "Videos/1/stream.mp4"),
+            "https://example.com/jellyfin/Videos/1/stream.mp4"
+        );
+        assert_eq!(
+            resolve_url(&base, "/emby/Videos/1/stream.mp4"),
+            "https://example.com/emby/Videos/1/stream.mp4"
+        );
     }
 
     #[tokio::test]

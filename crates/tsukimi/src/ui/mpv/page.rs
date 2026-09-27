@@ -2676,6 +2676,14 @@ fn direct_play_url(source: &MediaSource, play_session_id: Option<&str>) -> Optio
 fn media_source_url(
     source: &MediaSource, play_session_id: Option<&str>,
 ) -> Option<(String, Option<MediaSourceFallback>)> {
+    if let Some(url) = source
+        .direct_stream_url
+        .as_deref()
+        .filter(|url| !url.is_empty())
+    {
+        return Some((url.to_owned(), None));
+    }
+
     if let Some(path) = source.path.as_deref()
         && Url::parse(path).is_ok()
     {
@@ -2692,6 +2700,51 @@ fn media_source_url(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::client::structs::MediaSource;
+
+    fn media_source(path: Option<&str>, direct_stream_url: Option<&str>) -> MediaSource {
+        MediaSource {
+            id: "source-id".into(),
+            name: String::new(),
+            size: None,
+            path: path.map(str::to_owned),
+            run_time_ticks: None,
+            bit_rate: None,
+            container: None,
+            direct_stream_url: direct_stream_url.map(str::to_owned),
+            transcoding_url: None,
+            live_stream_id: Some("live-stream-id".into()),
+            media_streams: vec![],
+            item_id: Some("item-id".into()),
+            etag: None,
+        }
+    }
+
+    #[test]
+    fn media_source_url_prefers_server_direct_stream_url() {
+        let source = media_source(
+            Some("https://example.com/videos/path.mp4"),
+            Some("https://cdn.example.com/video.mp4?token=abc"),
+        );
+
+        assert_eq!(
+            media_source_url(&source, None),
+            Some(("https://cdn.example.com/video.mp4?token=abc".into(), None))
+        );
+    }
+
+    #[test]
+    fn media_source_url_uses_path_when_direct_stream_url_empty() {
+        let source = media_source(Some("https://example.com/videos/path.mp4"), Some(""));
+
+        assert_eq!(
+            media_source_url(&source, None),
+            Some((
+                "https://example.com/videos/path.mp4".into(),
+                Some(MediaSourceFallback::PlaybackInfo)
+            ))
+        );
+    }
 
     fn scope(account_name: &str, user_id: &str, endpoint: &str) -> PlaybackCacheScope {
         PlaybackCacheScope {
