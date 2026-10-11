@@ -2631,6 +2631,8 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "wayland-client",
+ "wayland-protocols",
  "wl-proxy",
 ]
 
@@ -4229,7 +4231,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
- "sha2 0.11.0",
+ "sha2",
  "strsim",
  "tokio",
  "tracing",

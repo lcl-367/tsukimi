@@ -1,3 +1,4 @@
+mod color;
 mod dmabuf;
 mod drm;
 #[cfg(feature = "profiling")]
@@ -17,7 +18,10 @@ pub use shm::{
 };
 
 use std::{
-    cell::RefCell,
+    cell::{
+        Cell,
+        RefCell,
+    },
     collections::HashMap,
     io,
     os::fd::OwnedFd,
@@ -38,6 +42,7 @@ use wl_proxy::{
     },
     protocols::{
         ObjectInterface,
+        color_management_v1::wp_color_manager_v1::WpColorManagerV1,
         drm::wl_drm::WlDrm,
         fractional_scale_v1::{
             wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1,
@@ -52,6 +57,7 @@ use wl_proxy::{
                 WlDisplay,
                 WlDisplayHandler,
             },
+            wl_output::WlOutput,
             wl_registry::{
                 WlRegistry,
                 WlRegistryHandler,
@@ -72,6 +78,7 @@ use wl_proxy::{
 };
 
 use self::{
+    color::ColorManagementState,
     dmabuf::{
         ALLOWED_FORMAT_PAIRS,
         BufferInfo,
@@ -89,6 +96,11 @@ use self::{
         ToplevelEntry,
         WmBaseHandler,
     },
+};
+
+use super::color::{
+    ColorDescription,
+    PREFERRED_COLOR,
 };
 
 enum ProxyEvent {
@@ -152,8 +164,10 @@ pub enum SurfaceContentUpdate {
 }
 
 pub struct SurfaceUpdate {
+    pub(crate) surface_id: u64,
     pub content: SurfaceContentUpdate,
     pub frame_callbacks: Option<FrameCallbacks>,
+    pub(crate) color: ColorDescription,
 }
 
 pub static FRAME_CHANNEL: Lazy<DmabufFrameChannel> = Lazy::new(|| {
@@ -203,6 +217,7 @@ impl ViewportChannel {
 }
 
 struct SharedState {
+    color_management: ColorManagementState,
     buffer_info: HashMap<u64, BufferInfo>,
     event_tx: flume::Sender<ProxyEvent>,
     frame_callbacks: HashMap<u64, Vec<Rc<WlCallback>>>,
@@ -290,6 +305,8 @@ impl WlDisplayHandler for DisplayHandler {
             viewporter_client_name,
             fractional_scale_manager_client_name,
             shm_client_name,
+            color_manager_client_name: None,
+            output_globals: HashMap::new(),
         });
     }
 }
@@ -301,13 +318,46 @@ struct RegistryHandler {
     viewporter_client_name: u32,
     fractional_scale_manager_client_name: u32,
     shm_client_name: u32,
+    color_manager_client_name: Option<u32>,
+    output_globals: HashMap<u32, OutputGlobal>,
+}
+
+struct OutputGlobal {
+    server_name: u32,
+    live: Rc<Cell<bool>>,
+    advertised: bool,
 }
 
 impl WlRegistryHandler for RegistryHandler {
     fn handle_global(
         &mut self, slf: &Rc<WlRegistry>, name: u32, interface: ObjectInterface, version: u32,
     ) {
-        if interface == ObjectInterface::XdgWmBase
+        if interface == ObjectInterface::WlOutput {
+            self.mapper.ignore_global(name);
+            let client_name = self.mapper.add_synthetic_global(slf, interface, version);
+            let live = self
+                .state
+                .borrow_mut()
+                .color_management
+                .add_output_global(name);
+            self.output_globals.insert(
+                client_name,
+                OutputGlobal {
+                    server_name: name,
+                    live,
+                    advertised: true,
+                },
+            );
+        } else if interface == ObjectInterface::WpColorManagerV1 {
+            // Keep discovery in upstream order instead of injecting this
+            // extension before the compositor's initial global list.
+            self.mapper.ignore_global(name);
+            self.color_manager_client_name = Some(self.mapper.add_synthetic_global(
+                slf,
+                ObjectInterface::WpColorManagerV1,
+                1,
+            ));
+        } else if interface == ObjectInterface::XdgWmBase
             || interface == ObjectInterface::WpViewporter
             || interface == ObjectInterface::WpFractionalScaleManagerV1
             || interface == ObjectInterface::WlShm
@@ -322,11 +372,28 @@ impl WlRegistryHandler for RegistryHandler {
     }
 
     fn handle_global_remove(&mut self, slf: &Rc<WlRegistry>, name: u32) {
+        for (&client_name, output) in &mut self.output_globals {
+            if output.server_name == name && output.advertised {
+                self.mapper.remove_synthetic_global(slf, client_name);
+                output.advertised = false;
+            }
+        }
+        self.state
+            .borrow_mut()
+            .color_management
+            .remove_output_global(name);
         self.mapper.forward_global_remove(slf, name);
     }
 
     fn handle_bind(&mut self, slf: &Rc<WlRegistry>, name: u32, id: Rc<dyn Object>) {
-        if name == self.xdg_wm_base_client_name {
+        if let Some(output) = self.output_globals.get(&name) {
+            id.downcast::<WlOutput>().set_handler(color::OutputBinding {
+                live: Rc::clone(&output.live),
+            });
+            slf.send_bind(output.server_name, id);
+        } else if Some(name) == self.color_manager_client_name {
+            color::bind_manager(&id.downcast::<WpColorManagerV1>(), Rc::clone(&self.state));
+        } else if name == self.xdg_wm_base_client_name {
             let wm_base = id.downcast::<XdgWmBase>();
             wm_base.set_forward_to_server(false);
             wm_base.set_handler(WmBaseHandler {
@@ -424,6 +491,7 @@ fn handle_viewport_update(shared: &Rc<RefCell<SharedState>>, viewport: Viewport)
 async fn run_client(
     state: Rc<State>, shared: Rc<RefCell<SharedState>>, event_rx: flume::Receiver<ProxyEvent>,
     mut viewport_rx: watch::Receiver<Option<Viewport>>, stop_rx: flume::Receiver<()>,
+    mut color_rx: watch::Receiver<ColorDescription>,
 ) {
     let poll_fd = match tokio::io::unix::AsyncFd::new(Rc::clone(state.poll_fd())) {
         Ok(fd) => fd,
@@ -466,6 +534,13 @@ async fn run_client(
                     handle_viewport_update(&shared, viewport);
                 }
             },
+            color = color_rx.changed() => {
+                if color.is_err() {
+                    return;
+                }
+                let preferred = color_rx.borrow_and_update().clone();
+                shared.borrow_mut().color_management.set_preferred(preferred);
+            },
             _ = stop_rx.recv_async() => return,
         }
     }
@@ -490,7 +565,10 @@ fn serve_client(
         let (event_tx, event_rx) = flume::unbounded();
         let mut viewport_rx = VIEWPORT_CHANNEL.subscribe();
         let viewport = *viewport_rx.borrow_and_update();
+        let mut color_rx = PREFERRED_COLOR.subscribe();
+        let preferred_color = color_rx.borrow_and_update().clone();
         let shared = Rc::new(RefCell::new(SharedState {
+            color_management: ColorManagementState::new(preferred_color),
             buffer_info: HashMap::new(),
             event_tx,
             frame_callbacks: HashMap::new(),
@@ -512,10 +590,10 @@ fn serve_client(
             .build()
             .map_err(|e| io::Error::other(format!("failed to create runtime: {e}")))?;
 
-        Ok((state, shared, event_rx, viewport_rx, runtime))
+        Ok((state, shared, event_rx, viewport_rx, color_rx, runtime))
     })();
 
-    let (state, shared, event_rx, viewport_rx, runtime) = match setup {
+    let (state, shared, event_rx, viewport_rx, color_rx, runtime) = match setup {
         Ok(setup) => setup,
         Err(error) => {
             let _ = ready_tx.send(Err(error));
@@ -533,6 +611,7 @@ fn serve_client(
         event_rx,
         viewport_rx,
         stop_rx,
+        color_rx,
     ));
     state.destroy();
 }
