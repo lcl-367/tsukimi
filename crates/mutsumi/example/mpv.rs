@@ -15,6 +15,7 @@ use mutsumi::{
 };
 
 fn main() {
+    unsafe { mutsumi::enable_color_management() };
     #[cfg(feature = "profiling")]
     let _profiling = mutsumi::start_proxy_profiling();
 

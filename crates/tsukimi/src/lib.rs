@@ -36,6 +36,8 @@ const APP_RESOURCE_PATH: &str = "/moe/tsuna/tsukimi";
 const GRESOURCE_FILE: &str = "tsukimi.gresource";
 
 pub fn run() -> gtk::glib::ExitCode {
+    // This is before GTK initialization and the Tokio runtime starts threads.
+    unsafe { mutsumi::enable_color_management() };
     Args::parse().init();
 
     // Initialize gettext
