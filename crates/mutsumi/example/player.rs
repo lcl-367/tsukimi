@@ -8,6 +8,7 @@ use mutsumi::{
 const DEFAULT_URL: &str = "https://www.bilibili.com/video/BV19X9eBpEfS";
 
 fn main() {
+    unsafe { mutsumi::enable_color_management() };
     #[cfg(feature = "profiling")]
     let _profiling = mutsumi::start_proxy_profiling();
 
