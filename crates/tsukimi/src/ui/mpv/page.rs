@@ -271,7 +271,7 @@ impl MpvTrackKind {
 }
 
 enum MediaSourceFallback {
-    DirectPlay(String),
+    DirectPlay(Vec<String>),
     PlaybackInfo,
 }
 
@@ -1555,15 +1555,22 @@ impl MPVPage {
                     return;
                 }
 
-                let Some((primary_url, fallback)) =
-                    media_source_url(media_source, playback_info.play_session_id.as_deref())
-                else {
+                let mut candidates =
+                    media_source_urls(media_source, playback_info.play_session_id.as_deref())
+                        .into_iter();
+                let Some(primary_url) = candidates.next() else {
                     obj.fail_playback(gettext("No media source found"));
                     return;
                 };
                 if !obj.request_is_current(generation) {
                     return;
                 }
+                let fallback = if media_source.live_stream_id.is_some() {
+                    Some(MediaSourceFallback::PlaybackInfo)
+                } else {
+                    let remaining: Vec<String> = candidates.collect();
+                    (!remaining.is_empty()).then_some(MediaSourceFallback::DirectPlay(remaining))
+                };
 
                 imp.back.replace(Some(back));
                 imp.video.set_slang(slang);
@@ -2121,9 +2128,19 @@ impl MPVPage {
         if value.contains("-13")
             && let Some(fallback) = imp.media_source_fallback.take()
         {
-            tracing::info!("Direct media path failed; retrying through the media server");
+            tracing::info!("Media URL failed to load; falling back to the next source");
             match fallback {
-                MediaSourceFallback::DirectPlay(url) => {
+                MediaSourceFallback::DirectPlay(urls) => {
+                    let mut urls = urls.into_iter();
+                    let Some(url) = urls.next() else {
+                        self.fail_playback(value);
+                        return;
+                    };
+                    let remaining: Vec<String> = urls.collect();
+                    if !remaining.is_empty() {
+                        imp.media_source_fallback
+                            .replace(Some(MediaSourceFallback::DirectPlay(remaining)));
+                    }
                     imp.playback_loads.borrow_mut().issued(failed);
                     imp.video.play(&url, imp.last_playback_position.get());
                 }
@@ -2184,16 +2201,15 @@ impl MPVPage {
             self.fail_playback(&original_error);
             return;
         };
-        let fallback = media_source
-            .transcoding_url
-            .as_deref()
-            .map(|url| (url, "Transcode"))
-            .or_else(|| {
-                media_source
-                    .direct_stream_url
-                    .as_deref()
-                    .map(|url| (url, "DirectStream"))
-            });
+        let fallback = [
+            ("Transcode", media_source.transcoding_url.as_deref()),
+            ("DirectStream", media_source.direct_stream_url.as_deref()),
+        ]
+        .into_iter()
+        .find_map(|(playmethod, url)| {
+            url.and_then(|url| JELLYFIN_CLIENT.resolve_media_url(url))
+                .map(|url| (url, playmethod))
+        });
         let Some((fallback_url, playmethod)) = fallback else {
             self.fail_playback(&original_error);
             return;
@@ -2207,7 +2223,7 @@ impl MPVPage {
         self.imp().playback_loads.borrow_mut().issued(request);
         self.imp()
             .video
-            .play(fallback_url, self.imp().last_playback_position.get());
+            .play(&fallback_url, self.imp().last_playback_position.get());
     }
 
     pub fn on_pause_update(&self, value: bool) {
@@ -2673,20 +2689,30 @@ fn direct_play_url(source: &MediaSource, play_session_id: Option<&str>) -> Optio
         .ok()
 }
 
-fn media_source_url(
-    source: &MediaSource, play_session_id: Option<&str>,
-) -> Option<(String, Option<MediaSourceFallback>)> {
+fn media_source_urls(source: &MediaSource, play_session_id: Option<&str>) -> Vec<String> {
+    let mut urls = Vec::new();
+    push_unique(
+        &mut urls,
+        source
+            .direct_stream_url
+            .as_deref()
+            .and_then(|url| JELLYFIN_CLIENT.resolve_media_url(url)),
+    );
     if let Some(path) = source.path.as_deref()
         && Url::parse(path).is_ok()
     {
-        let fallback = if source.live_stream_id.is_some() {
-            Some(MediaSourceFallback::PlaybackInfo)
-        } else {
-            direct_play_url(source, play_session_id).map(MediaSourceFallback::DirectPlay)
-        };
-        return Some((path.to_owned(), fallback));
+        push_unique(&mut urls, Some(path.to_owned()));
     }
-    direct_play_url(source, play_session_id).map(|url| (url, None))
+    push_unique(&mut urls, direct_play_url(source, play_session_id));
+    urls
+}
+
+fn push_unique(urls: &mut Vec<String>, url: Option<String>) {
+    if let Some(url) = url
+        && !urls.contains(&url)
+    {
+        urls.push(url);
+    }
 }
 
 #[cfg(test)]
